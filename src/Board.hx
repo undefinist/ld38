@@ -5,13 +5,20 @@ import luxe.Vector;
 import luxe.components.sprite.SpriteAnimation;
 import luxe.Input.MouseEvent;
 import luxe.Input.MouseButton;
+import phoenix.Texture;
+import luxe.tween.Actuate;
+import luxe.tween.easing.*;
+import luxe.Text;
+import phoenix.BitmapFont;
+import luxe.Entity;
+import luxe.resource.Resource;
 
-class Board {
+class Board extends Entity {
 
     private static inline var ROWS = 5;
     private static inline var COLUMNS = 5;
-    public static inline var TOP = 320 - 16 - 16;
-    public static inline var LEFT = 480 - 16 - 16;
+    public static inline var TOP = 320 - Tile.SIZE - Tile.SIZE;
+    public static inline var LEFT = 200 - Tile.SIZE - Tile.SIZE;
 
     var current_tile:Tile;
     var tiles:Array<Array<Tile>>;
@@ -22,119 +29,223 @@ class Board {
     var tile_preview:Sprite;
     var tile_preview_anim:SpriteAnimation;
     var tile_preview_rot:Int;
-
-    var path_finding:Array<Tile>;
-    var path_finding_checked:Array<Tile>;
+    var arrows:Array<Arrow>;
+    var font:BitmapFont;
+    var slide_sound:AudioResource;
+    var score_sound:AudioResource;
 
     var drag_start:Vector;
-    var dragging:Bool;
+    public var dragging:Bool;
     var drag_tile_x:Int;
     var drag_tile_y:Int;
     var drag_orientation:Int;
     var shift_valid:Bool;
 
     public function new() {
-        var spr = new Sprite({ name:"board", pos:Luxe.screen.mid, size:new Vector(ROWS * 16, COLUMNS * 16), color:new Color().rgb(0xffffff)});
+        super({ name: "Board" });
+    }
+
+    override function init() {
+        var tex = Luxe.resources.texture("assets/board.png");
+        tex.filter_mag = tex.filter_min = FilterType.nearest;
+        var spr = new Sprite({ name:"board", pos:Luxe.screen.mid, texture:tex });
+
+        font = Luxe.resources.font('assets/font.fnt');
+        var t = new Text({
+            name: "next",
+            text: "next",
+            pos: Luxe.screen.mid.subtract_xyz(0, Tile.SIZE * 4 + 12),
+            point_size : 24,
+            font: font,
+            sdf: true,
+            align: TextAlign.center,
+            align_vertical: TextAlign.center,
+            color: new Color().rgb(0xcbdbfc)
+        });
 
         tiles = new Array<Array<Tile>>();
         for(i in 0...ROWS) {
             tiles.push(new Array<Tile>());
             for(j in 0...COLUMNS) {
                 tiles[i].push(null);
-                var spr = new Sprite({ name:"cell", name_unique: true, pos: new Vector(LEFT + j * 16, TOP + i * 16), size: new Vector(14, 14), color: new Color().rgb(0x000000)});
             }
         }
 
-
-
         var tex = Luxe.resources.texture("assets/tiles.png");
-        tile_preview = new Sprite({ name:"preview", pos:new Vector(480, TOP - 24), texture:tex, size:new Vector(16, 16)});
+        tile_preview = new Sprite({ name:"preview",
+            pos:Luxe.screen.mid.subtract_xyz(0, Tile.SIZE * 3.5),
+            texture:tex, size:new Vector(Tile.SIZE, Tile.SIZE)});
         tile_preview_anim = tile_preview.add(new SpriteAnimation({name:"anim"}));
-        tile_preview_anim.add_from_json('{"default":{"frame_size":{"x":16,"y":16},"frameset":["1-7"],"speed":0}}');
+        tile_preview_anim.add_from_json('{"default":{"frame_size":{"x":64,"y":64},"frameset":["1-16"],"speed":0}}');
         tile_preview_anim.animation = "default";
+        arrows = [];
 
         tile_bag = new TileBag();
-        tile_preview_index = 1;
+        tile_preview_index = tile_bag.next().index;
         next_tile(2, 2);
 
         drag_start = new Vector();
         dragging = false;
+
+        slide_sound = Luxe.resources.audio("assets/slide.wav");
+        score_sound = Luxe.resources.audio("assets/score.wav");
     }
 
-    public function next_tile(x:Int, y:Int) {
-        if(current_tile == null) {
-            current_tile = new Tile(tile_preview_index, x, y);
-            for(i in 0...tile_preview_rot) {
-                current_tile.rotate(1);
+    private function next_tile(x:Int, y:Int) {
+        current_tile = new Tile(tile_preview_index, x, y);
+        // for(i in 0...tile_preview_rot) {
+        //     current_tile.rotate(1);
+        // }
+        preview_tile();
+        place_tile();
+
+        var rows = [];
+        var cols = [];
+        for(i in 0...ROWS) {
+            for(j in 0...COLUMNS) {
+                if(tiles[i][j] != null) {
+                    if(rows.indexOf(i) == -1)
+                        rows.push(i);
+                    if(cols.indexOf(j) == -1)
+                        cols.push(j);
+                }
             }
-            preview_tile();
-            place_tile();
         }
-        else
-            current_tile.placement(x, y);
+
+        while(arrows.length > 0) {
+            arrows.pop().destroy();
+        }
+
+        for(index in rows) {
+            var shiftable_left = false;
+            var shiftable_right = false;
+            for(i in 0...COLUMNS) {
+                var t = get_tile(i, index);
+                if(!shiftable_left) {
+                    if(t != null && tile_has_empty_space(i, index, Left))
+                        shiftable_left = true;
+                }
+                t = get_tile(COLUMNS - 1 - i, index);
+                if(!shiftable_right) {
+                    if(t != null && tile_has_empty_space(COLUMNS - 1 - i, index, Right))
+                        shiftable_right = true;
+                }
+            }
+            if(shiftable_left)
+                arrows.push(new Arrow(Left, index, this));
+            if(shiftable_right)
+                arrows.push(new Arrow(Right, index, this));
+        }
+
+        for(index in cols) {
+            var shiftable_up = false;
+            var shiftable_down = false;
+            for(i in 0...ROWS) {
+                var t = get_tile(index, i);
+                if(!shiftable_up) {
+                    if(t != null && tile_has_empty_space(index, i, Up))
+                        shiftable_up = true;
+                }
+                t = get_tile(index, ROWS - 1 - i);
+                if(!shiftable_down) {
+                    if(t != null && tile_has_empty_space(index, ROWS - 1 - i, Down))
+                        shiftable_down = true;
+                }
+            }
+            if(shiftable_up)
+                arrows.push(new Arrow(Up, index, this));
+            if(shiftable_down)
+                arrows.push(new Arrow(Down, index, this));
+        }
+
     }
 
-    public function place_tile() {
+    private function place_tile() {
         tiles[current_tile.tile_y][current_tile.tile_x] = current_tile;
         last_x = current_tile.tile_x;
         last_y = current_tile.tile_y;
 
-        for(t in find_completed_paths()) {
-        //    if(current_tile == t)
-        //        continue;
-            tiles[t.tile_y][t.tile_x] = null;
-            t.destroy();
+        clear_tiles(find_completed_paths());
+
+        var full = true;
+        for(row in tiles) {
+            for(t in row) {
+                if(t == null) {
+                    full = false;
+                    break;
+                }
+            }
+            if(!full)
+                break;
+        }
+        if(full) { // game over
+            tile_preview.destroy();
+            var text:Text = Luxe.scene.get("next");
+            text.destroy();
+            events.fire("on_game_over");
         }
 
         current_tile = null;
     }
 
-    public function preview_tile() {
+    private function clear_tiles(list:Array<Tile>) {
+        if(list.length == 0)
+            return;
+
+        list.sort(function(a, b) {
+            var i = a.tile_y * COLUMNS + a.tile_x;
+            var j = b.tile_y * COLUMNS + b.tile_x;
+            return i > j ? 1 : -1;
+        });
+
+        var i = 0;
+        var total = 0;
+        for(t in list) {
+            tiles[t.tile_y][t.tile_x] = null;
+            Actuate.tween(t.size, 0.35, {x: Tile.SIZE * 1.1, y: Tile.SIZE * 1.1})
+                .delay(i++ * 0.2)
+                .onComplete(function() {
+                    t.size.set_xy(Tile.SIZE, Tile.SIZE);
+                    Actuate.tween(t.color, 0.5, {a: 0}).onComplete(function() {
+                        t.destroy();
+                    });
+                });
+
+            var score = Math.round(Math.pow(2, i) * 5);
+            var text = new Text({
+                text: Std.string(score),
+                pos: new Vector(LEFT + t.tile_x * Tile.SIZE, TOP + t.tile_y * Tile.SIZE - 16),
+                point_size : 36,
+                font: font,
+                sdf: true,
+                align: TextAlign.center,
+                align_vertical: TextAlign.center,
+                color: new Color().rgb(0xcbdbfc),
+                outline: 0.1,
+                outline_color: new Color().rgb(0x306082)
+            });
+            Actuate.tween(text.color, 0.45, {a:0}).delay(0.75 + i * 0.2);
+            Actuate.tween(text.pos, 0.5, {y: text.pos.y - 32})
+                .delay(0.75 + i * 0.2)
+                .onComplete(function() {
+                    text.destroy();
+                });
+
+            Luxe.timer.schedule((i - 1) * 0.2, Luxe.audio.play.bind(score_sound.source));
+
+
+            total += score;
+        }
+
+        events.fire("Board.on_score", total);
+    }
+
+    private function preview_tile() {
         var info = tile_bag.next();
         tile_preview_index = info.index;
         tile_preview_anim.frame = tile_preview_index;
         tile_preview_rot = info.rotation;
         tile_preview.rotation_z = 90 * tile_preview_rot;
-    }
-
-    public function valid_placement(x:Int, y:Int):Bool {
-        if(x < 0 || y < 0 || x >= 5 || y >= 5)
-            return false;
-        return tiles[y][x] == null;
-    }
-
-    public function valid_rotation():Bool {
-        var valid = true;
-        var tile:Tile;
-        tile = get_tile(current_tile.tile_x, current_tile.tile_y - 1);
-        if(tile != null) {
-            if(current_tile.directions.has(Up) != tile.directions.has(Down))
-                valid = false;
-            else if(tile.directions.has(Down) && current_tile.type != tile.type)
-                valid = false;
-        }
-        tile = get_tile(current_tile.tile_x, current_tile.tile_y + 1);
-        if(tile != null) {
-            if(current_tile.directions.has(Down) != tile.directions.has(Up))
-                valid = false;
-            else if(tile.directions.has(Up) && current_tile.type != tile.type)
-                valid = false;
-        }
-        tile = get_tile(current_tile.tile_x - 1, current_tile.tile_y);
-        if(tile != null) {
-            if(current_tile.directions.has(Left) != tile.directions.has(Right))
-                valid = false;
-            else if(tile.directions.has(Right) && current_tile.type != tile.type)
-                valid = false;
-        }
-        tile = get_tile(current_tile.tile_x + 1, current_tile.tile_y);
-        if(tile != null) {
-            if(current_tile.directions.has(Right) != tile.directions.has(Left))
-                valid = false;
-            else if(tile.directions.has(Left) && current_tile.type != tile.type)
-                valid = false;
-        }
-        return valid;
     }
 
     private function get_tile(x:Int, y:Int):Tile {
@@ -246,47 +357,26 @@ class Board {
         return true;
     }
 
-    public function update(dt:Float) {
-        if(Luxe.input.inputpressed("up") && valid_placement(last_x, last_y - 1))
-            next_tile(last_x, last_y - 1);
-        if(Luxe.input.inputpressed("down") && valid_placement(last_x, last_y + 1))
-            next_tile(last_x, last_y + 1);
-        if(Luxe.input.inputpressed("left") && valid_placement(last_x - 1, last_y))
-            next_tile(last_x - 1, last_y);
-        if(Luxe.input.inputpressed("right") && valid_placement(last_x + 1, last_y))
-            next_tile(last_x + 1, last_y);
+    override function update(dt:Float) {
 
-        if(current_tile == null)
-            return;
-
-        if(Luxe.input.inputpressed("rotate_left"))
-            current_tile.rotate(-1);
-        else if(Luxe.input.inputpressed("rotate_right"))
-            current_tile.rotate(1);
-
-        if(valid_rotation()) {
-            current_tile.color = new luxe.Color().rgb(0xffffff);
-            if(Luxe.input.inputpressed("place"))
-                place_tile();
-        }
-        else
-            current_tile.color = new luxe.Color().rgb(0xff0000);
     }
 
-    public function onmousedown(e:MouseEvent) {
+    override function onmousedown(e:MouseEvent) {
         if(!dragging && e.button == MouseButton.left) {
             var mid = Luxe.screen.mid;
-            if(e.pos.x > mid.x - 80 && e.pos.y > mid.y - 80 && e.pos.x < mid.x + 80 && e.pos.y < mid.y + 80) {
+            var half = Tile.SIZE * 2.5 - 16;
+            if(e.pos.x > mid.x - half && e.pos.y > mid.y - half &&
+                e.pos.x < mid.x + half && e.pos.y < mid.y + half) {
                 dragging = true;
                 drag_start.copy_from(e.pos);
-                drag_tile_x = Math.floor((drag_start.x - (mid.x - 80)) / 32);
-                drag_tile_y = Math.floor((drag_start.y - (mid.y - 80)) / 32);
+                drag_tile_x = Math.floor((drag_start.x - (mid.x - half)) / Tile.SIZE);
+                drag_tile_y = Math.floor((drag_start.y - (mid.y - half)) / Tile.SIZE);
                 drag_orientation = 0;
             }
         }
     }
 
-    public function onmousemove(e:MouseEvent) {
+    override function onmousemove(e:MouseEvent) {
         if(dragging) {
             var diff = e.pos.clone().subtract(drag_start);
 
@@ -320,8 +410,8 @@ class Board {
             }
 
             if(drag_orientation == -1) {
-                if(diff.x > 16) diff.x = 16;
-                else if(diff.x < -16) diff.x = -16;
+                if(diff.x > Tile.SIZE) diff.x = Tile.SIZE;
+                else if(diff.x < -Tile.SIZE) diff.x = -Tile.SIZE;
                 var shiftable = false;
                 for(i in 0...COLUMNS) {
                     if(diff.x < 0) {
@@ -345,8 +435,8 @@ class Board {
                 }
             }
             else if(drag_orientation == 1){
-                if(diff.y > 16) diff.y = 16;
-                else if(diff.y < -16) diff.y = -16;
+                if(diff.y > Tile.SIZE) diff.y = Tile.SIZE;
+                else if(diff.y < -Tile.SIZE) diff.y = -Tile.SIZE;
                 var shiftable = false;
                 for(i in 0...ROWS) {
                     if(diff.y < 0) {
@@ -372,14 +462,14 @@ class Board {
         }
     }
 
-    public function onmouseup(e:MouseEvent) {
-        if(e.button == MouseButton.left) {
+    override function onmouseup(e:MouseEvent) {
+        if(dragging && e.button == MouseButton.left) {
             dragging = false;
 
             var diff = e.pos.clone().subtract(drag_start);
             var adx = Math.abs(diff.x);
             var ady = Math.abs(diff.y);
-            if(adx < 8 && ady < 8 || !shift_valid) {
+            if(adx < Tile.SIZE / 2 && ady < Tile.SIZE / 2 || !shift_valid) {
                 for(i in 0...COLUMNS) {
                     var t = get_tile(i, drag_tile_y);
                     if(t != null)
@@ -392,15 +482,15 @@ class Board {
                 }
             }
             else if(adx > ady) {
-                drag_row(drag_tile_y, Math.round(diff.x));
+                shift_row(drag_tile_y, Math.round(diff.x));
             }
             else {
-                drag_col(drag_tile_x, Math.round(diff.y));
+                shift_col(drag_tile_x, Math.round(diff.y));
             }
         }
     }
 
-    private function drag_row(index:Int, dir:Int) {
+    public function shift_row(index:Int, dir:Int) {
         for(i in 0...COLUMNS) {
             if(dir < 0) {
                 shift_tile(i, index, Left);
@@ -410,9 +500,10 @@ class Board {
             }
         }
         next_tile(dir >= 0 ? 0 : COLUMNS - 1, index);
+        Luxe.audio.play(slide_sound.source, 0.75);
     }
 
-    private function drag_col(index:Int, dir:Int) {
+    public function shift_col(index:Int, dir:Int) {
         for(i in 0...ROWS) {
             if(dir < 0) {
                 shift_tile(index, i, Up);
@@ -422,6 +513,7 @@ class Board {
             }
         }
         next_tile(index, dir >= 0 ? 0 : ROWS - 1);
+        Luxe.audio.play(slide_sound.source, 0.75);
     }
 
     private function tile_has_empty_space(x:Int, y:Int, dir:Direction):Bool {
@@ -464,7 +556,7 @@ class Board {
             else {
                 var t0 = get_tile(x - 1, y);
                 if(t0 == null) {
-                    t.placement(x - 1, y);
+                    t.shift(-1, 0);
                     tiles[y][x - 1] = t;
                     tiles[y][x] = null;
                 }
@@ -475,7 +567,7 @@ class Board {
             else {
                 var t0 = get_tile(x + 1, y);
                 if(t0 == null) {
-                    t.placement(x + 1, y);
+                    t.shift(1, 0);
                     tiles[y][x + 1] = t;
                     tiles[y][x] = null;
                 }
@@ -486,7 +578,7 @@ class Board {
             else {
                 var t0 = get_tile(x, y - 1);
                 if(t0 == null) {
-                    t.placement(x, y - 1);
+                    t.shift(0, -1);
                     tiles[y - 1][x] = t;
                     tiles[y][x] = null;
                 }
@@ -497,7 +589,7 @@ class Board {
             else {
                 var t0 = get_tile(x, y + 1);
                 if(t0 == null) {
-                    t.placement(x, y + 1);
+                    t.shift(0, 1);
                     tiles[y + 1][x] = t;
                     tiles[y][x] = null;
                 }

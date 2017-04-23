@@ -19,9 +19,8 @@ class TileBag {
     private function refill() {
         while(list.length > 0)
             list.pop();
-        for(i in 1...8) {
-            if(i == 3) continue;
-            for(j in 0...4) {
+        for(i in 1...17) {
+            for(j in 0...1) {
                 list.push({index: i, rotation: j});
             }
         }
