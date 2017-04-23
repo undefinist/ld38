@@ -40,6 +40,7 @@ class Board extends Entity {
     var drag_tile_y:Int;
     var drag_orientation:Int;
     var shift_valid:Bool;
+    var shifting:Bool;
 
     public function new() {
         super({ name: "Board" });
@@ -76,7 +77,7 @@ class Board extends Entity {
             pos:Luxe.screen.mid.subtract_xyz(0, Tile.SIZE * 3.5),
             texture:tex, size:new Vector(Tile.SIZE, Tile.SIZE)});
         tile_preview_anim = tile_preview.add(new SpriteAnimation({name:"anim"}));
-        tile_preview_anim.add_from_json('{"default":{"frame_size":{"x":64,"y":64},"frameset":["1-16"],"speed":0}}');
+        tile_preview_anim.add_from_json('{"default":{"frame_size":{"x":64,"y":64},"frameset":["1-20"],"speed":0}}');
         tile_preview_anim.animation = "default";
         arrows = [];
 
@@ -86,6 +87,7 @@ class Board extends Entity {
 
         drag_start = new Vector();
         dragging = false;
+        shifting = false;
 
         slide_sound = Luxe.resources.audio("assets/slide.wav");
         score_sound = Luxe.resources.audio("assets/score.wav");
@@ -363,6 +365,8 @@ class Board extends Entity {
 
     override function onmousedown(e:MouseEvent) {
         if(!dragging && e.button == MouseButton.left) {
+            if(shifting)
+                return;
             var mid = Luxe.screen.mid;
             var half = Tile.SIZE * 2.5 - 16;
             if(e.pos.x > mid.x - half && e.pos.y > mid.y - half &&
@@ -491,6 +495,8 @@ class Board extends Entity {
     }
 
     public function shift_row(index:Int, dir:Int) {
+        if(shifting)
+            return;
         for(i in 0...COLUMNS) {
             if(dir < 0) {
                 shift_tile(i, index, Left);
@@ -501,9 +507,13 @@ class Board extends Entity {
         }
         next_tile(dir >= 0 ? 0 : COLUMNS - 1, index);
         Luxe.audio.play(slide_sound.source, 0.75);
+        shifting = true;
+        Luxe.timer.schedule(0.4, function() { shifting = false; });
     }
 
     public function shift_col(index:Int, dir:Int) {
+        if(shifting)
+            return;
         for(i in 0...ROWS) {
             if(dir < 0) {
                 shift_tile(index, i, Up);
@@ -514,6 +524,8 @@ class Board extends Entity {
         }
         next_tile(index, dir >= 0 ? 0 : ROWS - 1);
         Luxe.audio.play(slide_sound.source, 0.75);
+        shifting = true;
+        Luxe.timer.schedule(0.4, function() { shifting = false; });
     }
 
     private function tile_has_empty_space(x:Int, y:Int, dir:Direction):Bool {

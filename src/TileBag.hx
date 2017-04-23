@@ -19,7 +19,7 @@ class TileBag {
     private function refill() {
         while(list.length > 0)
             list.pop();
-        for(i in 1...17) {
+        for(i in 1...21) {
             for(j in 0...1) {
                 list.push({index: i, rotation: j});
             }

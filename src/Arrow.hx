@@ -46,6 +46,10 @@ class Arrow extends Sprite {
     }
 
     override function update(dt:Float) {
+        if(hover)
+            color.rgb(0xb0b0b0);
+        else
+            color.rgb(0xffffff);
         if(hover && Luxe.input.mousepressed(left)) {
             switch dir {
             case Up: board.shift_col(index, -1);
@@ -53,7 +57,6 @@ class Arrow extends Sprite {
             case Left: board.shift_row(index, -1);
             case Right: board.shift_row(index, 1);
             }
-
         }
     }
 

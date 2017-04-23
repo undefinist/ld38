@@ -13,7 +13,8 @@ class Tile extends Sprite {
         Right, Left, Up, Down,
         Left | Up, Up | Right, Right | Down, Down | Left,
         Left | Right, Up | Down, Left | Right, Up | Down,
-        Left | Up, Up | Right, Right | Down, Down | Left
+        Left | Up, Up | Right, Right | Down, Down | Left,
+        Right, Left, Up, Down
     ];
 
     public var type:TileType;
@@ -44,7 +45,7 @@ class Tile extends Sprite {
 
     override function init() {
         var anim:SpriteAnimation = add(new SpriteAnimation({name:"anim"}));
-        anim.add_from_json('{"default":{"frame_size":{"x":64,"y":64},"frameset":["1-16"],"speed":0}}');
+        anim.add_from_json('{"default":{"frame_size":{"x":64,"y":64},"frameset":["1-20"],"speed":0}}');
         anim.animation = "default";
         anim.frame = index;
     }
