@@ -22,8 +22,6 @@ class Board extends Entity {
 
     var current_tile:Tile;
     var tiles:Array<Array<Tile>>;
-    var last_x:Int;
-    var last_y:Int;
     var tile_bag:TileBag;
     var tile_preview_index:Int;
     var tile_preview:Sprite;
@@ -164,8 +162,6 @@ class Board extends Entity {
 
     private function place_tile() {
         tiles[current_tile.tile_y][current_tile.tile_x] = current_tile;
-        last_x = current_tile.tile_x;
-        last_y = current_tile.tile_y;
 
         clear_tiles(find_completed_paths());
 
@@ -233,7 +229,7 @@ class Board extends Entity {
                     text.destroy();
                 });
 
-            Luxe.timer.schedule((i - 1) * 0.2, Luxe.audio.play.bind(score_sound.source));
+            Luxe.timer.schedule((i - 1) * 0.2 + 0.2, Luxe.audio.play.bind(score_sound.source));
 
 
             total += score;
@@ -377,6 +373,24 @@ class Board extends Entity {
                 drag_tile_y = Math.floor((drag_start.y - (mid.y - half)) / Tile.SIZE);
                 drag_orientation = 0;
             }
+            // else if(tile_preview.point_inside_AABB(e.pos)) {
+            //     switch tile_preview_index {
+            //     case 1 | 2 | 3: tile_preview_index++;
+            //     case 4: tile_preview_index = 1;
+            //     case 5 | 6 | 7: tile_preview_index++;
+            //     case 8: tile_preview_index = 5;
+            //     case 9: tile_preview_index = 10;
+            //     case 10: tile_preview_index = 9;
+            //     case 11: tile_preview_index = 12;
+            //     case 12: tile_preview_index = 11;
+            //     case 13 | 14 | 15: tile_preview_index++;
+            //     case 16: tile_preview_index = 13;
+            //     case 17 | 18 | 19: tile_preview_index++;
+            //     case 20: tile_preview_index = 17;
+            //     }
+            //     tile_preview_anim.frame = tile_preview_index;
+            //
+            // }
         }
     }
 
